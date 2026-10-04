@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101b2d">
+    <meta name="description" content="AirPower fleet readiness and predictive maintenance operations demo.">
+    <title>AirPower | Fleet Readiness</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#dashboard" aria-label="AirPower home">
+          <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 18.2 27.5 5 20 27l-4.4-7.1L4 18.2Z" fill="currentColor"/><path d="m15.6 19.9 5.1-5.1" fill="none" stroke="#13243b" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+          <span class="brand-name">AIR<span>POWER</span><small>READINESS PLATFORM</small></span>
+        </a>
+        <div class="sidebar-label">OPERATIONS</div>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a href="#dashboard" data-page="dashboard" class="nav-link active"><span class="nav-icon">⌂</span><span>Command overview</span></a>
+          <a href="#fleet" data-page="fleet" class="nav-link"><span class="nav-icon">✦</span><span>Fleet</span><span class="nav-count" id="fleet-nav-count">12</span></a>
+          <a href="#predictions" data-page="predictions" class="nav-link"><span class="nav-icon">⌁</span><span>Predictions</span><span class="nav-count alert-count" id="alert-nav-count">6</span></a>
+          <a href="#maintenance" data-page="maintenance" class="nav-link"><span class="nav-icon">⚒</span><span>Maintenance</span></a>
+          <a href="#inventory" data-page="inventory" class="nav-link"><span class="nav-icon">▤</span><span>Inventory</span></a>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <div class="security-card">
+          <span class="security-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.2 16 4.5v4.7c0 4-2.4 6.8-6 8.6-3.6-1.8-6-4.6-6-8.6V4.5l6-2.3Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m7.2 9.7 1.8 1.8 3.8-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>Local demo mode</strong><small>Data stays on this machine</small></div>
+          <span class="secure-dot"></span>
+        </div>
+        <div class="sidebar-user">
+          <div class="avatar">AO</div>
+          <div class="user-copy"><strong>Air Ops</strong><small>Readiness desk</small></div>
+          <span class="user-menu">···</span>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
+          <div class="breadcrumb"><span>OPERATIONS</span><b>/</b><strong id="breadcrumb-current">COMMAND OVERVIEW</strong></div>
+          <div class="topbar-actions">
+            <div class="live-status checking" id="system-status"><span class="pulse-dot"></span> CHECKING API</div>
+            <button class="icon-button" id="refresh-button" aria-label="Refresh data" title="Refresh data"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.2 6.2 0 0 0-10.5-3L4 6.5M4 3.5v3h3M4 12a6.2 6.2 0 0 0 10.5 3L16 13.5m0 3v-3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <div class="topbar-divider"></div>
+            <div class="date-label"><span class="date-icon">◷</span><span id="today-label"></span></div>
+          </div>
+        </header>
+        <div class="demo-banner"><span class="demo-pill">DEMO DATA</span><span>All aircraft, telemetry, and predictions are synthetic examples—not operational data or maintenance instructions.</span></div>
+        <div id="page-content" class="page-content" aria-live="polite"><div class="loading-state"><span class="loader"></span> Loading fleet picture…</div></div>
+        <footer class="page-footer"><span>AirPower · Predictive Maintenance &amp; Fleet Availability</span><span>Local demonstration build <i></i> No live aircraft connectivity</span></footer>
+      </main>
+    </div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <dialog id="work-order-dialog" class="dialog">
+      <form method="dialog" id="work-order-form">
+        <div class="dialog-header"><div><span class="eyebrow">MAINTENANCE PLANNING</span><h2>Create work order</h2></div><button type="button" class="dialog-close" id="close-dialog" aria-label="Close dialog">×</button></div>
+        <label class="field-label" for="wo-aircraft">Aircraft</label><select id="wo-aircraft" name="aircraft_id" required></select>
+        <label class="field-label" for="wo-title">Work description</label><input id="wo-title" name="title" maxlength="120" placeholder="e.g. Inspect hydraulic pump" required>
+        <div class="field-row"><div><label class="field-label" for="wo-priority">Priority</label><select id="wo-priority" name="priority"><option>Routine</option><option>High</option><option>Urgent</option></select></div><div><label class="field-label" for="wo-date">Due date</label><input id="wo-date" name="due_date" type="date" required></div></div>
+        <p class="dialog-note">This demo records a planning work order only. Validate all work against approved technical publications.</p>
+        <div class="dialog-actions"><button type="button" class="button-secondary" id="cancel-work-order">Cancel</button><button type="submit" class="button-primary">Create work order <span>→</span></button></div>
+      </form>
+    </dialog>
+  </body>
+</html>
