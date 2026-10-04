@@ -1,5 +1,6 @@
 const pageContent = document.getElementById('page-content');
 const pageNames = {
+  guide: 'PROTOTYPE USER FLOW',
   dashboard: 'COMMAND OVERVIEW',
   fleet: 'FLEET',
   predictions: 'PREDICTIVE INSIGHTS',
@@ -146,6 +147,7 @@ function dashboardMarkup(data) {
     <article class="kpi-card"><div class="kpi-topline">AI risk flags <span class="kpi-icon amber">⌁</span></div><div class="kpi-bottom"><span class="kpi-value">${data.active_alerts}</span><span class="kpi-unit">need review</span></div><div class="kpi-foot"><span class="warn">${data.urgent_work_orders} urgent</span> open work orders</div></article>
     <article class="kpi-card"><div class="kpi-topline">Open work orders <span class="kpi-icon red">⚒</span></div><div class="kpi-bottom"><span class="kpi-value">${data.open_work_orders}</span><span class="kpi-unit">in workflow</span></div><div class="kpi-foot">Scheduled and in progress</div></article>
   </div>
+  <section class="panel workflow-prompt"><div><span class="eyebrow">FIRST TIME HERE?</span><strong>Follow the demo workflow from imported records to tracked maintenance work.</strong><p>Use sample files only. The model is illustrative and does not make airworthiness decisions.</p></div><button class="button-secondary" data-action="navigate" data-target="guide">View user flow <span>→</span></button></section>
   <div class="dashboard-grid">
     <section class="panel">
       <div class="panel-heading"><div><h2>Fleet availability</h2><p>Mission-capable aircraft · last 7 days</p></div><button class="panel-action" data-action="navigate" data-target="fleet">Fleet details →</button></div>
@@ -163,6 +165,25 @@ function dashboardMarkup(data) {
     <div class="table-footer"><span>Showing ${Math.min(data.fleet.length, 5)} of ${data.fleet_total} aircraft</span><span>Health index is synthetic demo data</span></div>
   <div class="section-note"><b>AI</b><span>The local logistic-regression demo scores four synthetic sensor signals. Its training labels and predictions are illustrative only; no real aircraft records or external AI service are used.</span></div>
   </section>`;
+}
+
+function renderGuide() {
+  pageContent.innerHTML = `${pageHeading('START HERE', 'How to use this prototype', 'A guided demonstration of how maintenance and logistics roles could coordinate around a shared fleet picture.', '<span class="demo-pill">SYNTHETIC DATA ONLY</span>')}
+    <section class="guide-boundary"><strong>Important: this is an evaluation prototype, not an operational maintenance system.</strong><span>It has one shared demo operator, no sign-in or role permissions, no live aircraft/system connection, and no durable shared production database. Never upload real or sensitive aircraft information. The AI scores generated examples only; do not use it to make maintenance, airworthiness, dispatch, or readiness decisions.</span></section>
+    <section class="panel guide-section"><div class="panel-heading"><div><h2>Who this workflow is for</h2><p>These are intended user roles; the current prototype does not enforce separate accounts or permissions.</p></div></div><div class="guide-role-grid">
+      <article class="guide-role"><span>OPERATIONS</span><h3>Fleet operations staff</h3><p>Review the fleet summary and aircraft statuses to understand the example readiness picture.</p></article>
+      <article class="guide-role"><span>MAINTENANCE</span><h3>Planners and maintainers</h3><p>Review component signals alongside technical history, then create and track a planning work order.</p></article>
+      <article class="guide-role"><span>LOGISTICS</span><h3>Supply staff</h3><p>Check demo stock, low-stock indicators, and the spare part linked to a component.</p></article>
+      <article class="guide-role"><span>LEADERSHIP</span><h3>Maintenance leads</h3><p>Use the combined demo view to discuss priorities, bottlenecks, and the information a real system would need.</p></article>
+    </div></section>
+    <section class="guide-section"><div class="guide-section-title"><span class="eyebrow">THE END-TO-END DEMO</span><h2>From source records to a tracked work order</h2><p>Each step uses the left navigation. Links below take you directly to the relevant screen.</p></div><div class="guide-steps">
+      <article class="guide-step"><span class="guide-step-number">01</span><div><h3>Load synthetic source records</h3><p>Open Data integration. Import aircraft first; then add technical maintenance records, stock, and component telemetry using the downloadable CSV templates. Review accepted, duplicate, rejected rows and source audit.</p><button class="panel-action" data-action="navigate" data-target="integrations">Go to Data integration →</button></div></article>
+      <article class="guide-step"><span class="guide-step-number">02</span><div><h3>Understand the fleet picture</h3><p>Open Fleet to search aircraft and compare the example status, health index, monitored components, and inspection dates. Availability and history charts are illustrative demo values.</p><button class="panel-action" data-action="navigate" data-target="fleet">Go to Fleet →</button></div></article>
+      <article class="guide-step"><span class="guide-step-number">03</span><div><h3>Review a component assessment</h3><p>Open Predictions and inspect sensor history, leading signals, linked maintenance history, suggested agency, and mapped spare. Treat a score as a demo output only; in a real process, a qualified maintainer must verify source data and approved technical publications.</p><button class="panel-action" data-action="navigate" data-target="predictions">Go to Predictions →</button></div></article>
+      <article class="guide-step"><span class="guide-step-number">04</span><div><h3>Plan and track maintenance</h3><p>Choose “Plan work” beside an example assessment, verify the aircraft/component, then create the planning order with an agency and optional stock reservation. Update its status in Maintenance; completion marks a reserved demo part as consumed.</p><button class="panel-action" data-action="navigate" data-target="maintenance">Go to Maintenance →</button></div></article>
+      <article class="guide-step"><span class="guide-step-number">05</span><div><h3>Check supply constraints and outcomes</h3><p>Use Inventory to review demo on-hand quantities and reorder points. Return to the dashboard to discuss how a real team might measure availability, downtime, repeat faults, work-order time, and spare-related delays against verified baseline data.</p><button class="panel-action" data-action="navigate" data-target="inventory">Go to Inventory →</button></div></article>
+    </div></section>
+    <section class="panel guide-next"><div><span class="eyebrow">WHAT REAL-WORLD DEPLOYMENT STILL REQUIRES</span><h2>Connect authorized systems only after the operating environment is approved</h2><p>A live service needs an accountable system owner, approved identity and role controls, persistent shared storage, auditable integrations with authorized maintenance/health/supply sources, data-quality monitoring, security accreditation, and independently validated models with human authority. These must be designed with the responsible organization; this public Vercel demo does not supply them.</p></div><button class="button-secondary" data-action="navigate" data-target="integrations">Review integration boundary <span>→</span></button></section>`;
 }
 
 async function renderDashboard() {
@@ -306,6 +327,7 @@ async function renderPage() {
   pageContent.innerHTML = '<div class="loading-state"><span class="loader"></span> Loading fleet picture…</div>';
   try {
     const renderers = {
+      guide: renderGuide,
       dashboard: renderDashboard,
       fleet: () => renderFleet(),
       predictions: renderPredictions,
@@ -500,8 +522,8 @@ async function updateSystemStatus() {
   try {
     await api('/api/health');
     status.classList.remove('offline', 'checking');
-    status.innerHTML = '<span class="pulse-dot"></span> SYSTEM ONLINE';
-    status.title = 'Local API is responding';
+    status.innerHTML = '<span class="pulse-dot"></span> DEMO API ONLINE';
+    status.title = 'The demonstrator API is responding; this does not indicate a live operational connection.';
   } catch (error) {
     status.classList.remove('checking');
     status.classList.add('offline');

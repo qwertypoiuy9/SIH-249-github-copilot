@@ -20,6 +20,7 @@ Vercel runs the API as a serverless function and stores its demo SQLite database
 
 ## Included
 
+- In-app **Prototype user flow** guide describing the intended users, end-to-end demo steps, and boundaries between the evaluation prototype and an operational system.
 - Fleet availability and health overview with seven-day illustrative trend.
 - Searchable aircraft register with fleet readiness and component risk.
 - A component digital-twin view joining sensor history, model explanation, maintenance records, agency suggestions, and mapped spare parts.
@@ -30,6 +31,18 @@ Vercel runs the API as a serverless function and stores its demo SQLite database
 - JSON API under `/api/` for dashboard, aircraft, alerts, predictions, model details, work orders, inventory, agencies, integration status, import audit, and maintenance history. CSV upload endpoints are `/api/import/aircraft`, `/api/import/telemetry`, `/api/import/maintenance`, and `/api/import/inventory`.
 
 Telemetry imports use the exact `telemetry` template header. Sensor feature values must be normalized to `0..1` before upload using an authorized, documented adapter transformation. Imports accept UTF-8 CSV files up to 2 MB and 5,000 data rows. Aircraft records must be loaded before the associated telemetry or technical records.
+
+## Prototype user flow
+
+The intended users are fleet operations staff, maintenance planners and maintainers, supply/logistics staff, and maintenance leads. They represent workflow roles only: the prototype currently has one shared operator and does not provide user accounts, access control, or role-specific permissions.
+
+1. **Prepare demo data:** in Data integration, import aircraft first, then maintenance records, inventory, and telemetry using the supplied CSV templates. Inspect the accepted/rejected row report and source import audit.
+2. **Review fleet context:** use Fleet to find aircraft and see its sample status, health, component-risk summary, and inspection date.
+3. **Investigate a signal:** in Predictions, inspect a component's sensor history, generated risk score, related maintenance record, suggested demo agency, and mapped spare. These are illustrative; do not act on them as real technical advice.
+4. **Plan work:** use Plan work to create a planning work order, optionally assigning an agency, linking a reviewed prediction, and reserving demo stock.
+5. **Track and discuss outcomes:** update the work-order status in Maintenance, inspect stock in Inventory, and use the dashboard to discuss which verified metrics a real program should measure.
+
+For this public prototype, use only synthetic examples. It has no live source connectors, authentication, role permissions, or durable shared production storage. Vercel's `/tmp` SQLite database is temporary and instance-local. Real operational deployment requires approved data/system access, secure identity and authorization, persistent shared storage, audit controls, security accreditation, and independently validated prognostics with qualified human decision-making.
 
 ## Run tests
 

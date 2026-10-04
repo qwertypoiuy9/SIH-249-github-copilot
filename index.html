@@ -18,6 +18,7 @@
         </a>
         <div class="sidebar-label">OPERATIONS</div>
         <nav class="main-nav" aria-label="Main navigation">
+          <a href="#guide" data-page="guide" class="nav-link"><span class="nav-icon">?</span><span>Prototype user flow</span></a>
           <a href="#dashboard" data-page="dashboard" class="nav-link active"><span class="nav-icon">⌂</span><span>Command overview</span></a>
           <a href="#fleet" data-page="fleet" class="nav-link"><span class="nav-icon">✦</span><span>Fleet</span><span class="nav-count" id="fleet-nav-count">12</span></a>
           <a href="#predictions" data-page="predictions" class="nav-link"><span class="nav-icon">⌁</span><span>Predictions</span><span class="nav-count alert-count" id="alert-nav-count">6</span></a>
@@ -28,12 +29,12 @@
         <div class="sidebar-spacer"></div>
         <div class="security-card">
           <span class="security-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.2 16 4.5v4.7c0 4-2.4 6.8-6 8.6-3.6-1.8-6-4.6-6-8.6V4.5l6-2.3Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m7.2 9.7 1.8 1.8 3.8-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <div><strong>Synthetic demo mode</strong><small>No operational data</small></div>
+          <div><strong>Evaluation prototype</strong><small>Synthetic data only</small></div>
           <span class="secure-dot"></span>
         </div>
         <div class="sidebar-user">
           <div class="avatar">AO</div>
-          <div class="user-copy"><strong>Air Ops</strong><small>Readiness desk</small></div>
+          <div class="user-copy"><strong>Demo operator</strong><small>Role-based access not enabled</small></div>
           <span class="user-menu">···</span>
         </div>
       </aside>
@@ -43,7 +44,7 @@
           <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
           <div class="breadcrumb"><span>OPERATIONS</span><b>/</b><strong id="breadcrumb-current">COMMAND OVERVIEW</strong></div>
           <div class="topbar-actions">
-            <div class="live-status checking" id="system-status"><span class="pulse-dot"></span> CHECKING API</div>
+            <div class="live-status checking" id="system-status"><span class="pulse-dot"></span> CHECKING DEMO API</div>
             <button class="icon-button" id="refresh-button" aria-label="Refresh data" title="Refresh data"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.2 6.2 0 0 0-10.5-3L4 6.5M4 3.5v3h3M4 12a6.2 6.2 0 0 0 10.5 3L16 13.5m0 3v-3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <div class="topbar-divider"></div>
             <div class="date-label"><span class="date-icon">◷</span><span id="today-label"></span></div>
@@ -51,7 +52,7 @@
         </header>
         <div class="demo-banner"><span class="demo-pill">PUBLIC DEMO</span><span>Synthetic examples only. Never upload classified, export-controlled, personal, or real operational aircraft data.</span></div>
         <div id="page-content" class="page-content" aria-live="polite"><div class="loading-state"><span class="loader"></span> Loading fleet picture…</div></div>
-        <footer class="page-footer"><span>AirPower · Predictive Maintenance &amp; Fleet Availability</span><span>Demo build <i></i> No live aircraft connectivity · Changes may reset</span></footer>
+        <footer class="page-footer"><span>AirPower · Predictive Maintenance &amp; Fleet Availability</span><span>Prototype only <i></i> No live aircraft connectivity · Changes may reset</span></footer>
       </main>
     </div>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
