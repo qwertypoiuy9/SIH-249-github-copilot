@@ -1,10 +1,13 @@
+import io
+import csv
 import json
+import math
 import mimetypes
 import random
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -65,6 +68,7 @@ def initialize():
                 thermal_deviation REAL NOT NULL,
                 pressure_drift REAL NOT NULL,
                 response_lag REAL NOT NULL,
+                source TEXT NOT NULL DEFAULT 'synthetic demo',
                 UNIQUE (aircraft_id, component, sample_cycle)
             );
             CREATE TABLE IF NOT EXISTS work_orders (
@@ -74,7 +78,11 @@ def initialize():
                 priority TEXT NOT NULL,
                 status TEXT NOT NULL,
                 due_date TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                component TEXT,
+                agency_id TEXT,
+                source_alert_id INTEGER,
+                notes TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS inventory (
                 id TEXT PRIMARY KEY,
@@ -86,8 +94,48 @@ def initialize():
                 lead_days INTEGER NOT NULL,
                 location TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS maintenance_agencies (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                base TEXT NOT NULL,
+                specialties TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS component_parts (
+                component TEXT PRIMARY KEY,
+                inventory_id TEXT NOT NULL REFERENCES inventory(id)
+            );
+            CREATE TABLE IF NOT EXISTS work_order_parts (
+                work_order_id INTEGER PRIMARY KEY REFERENCES work_orders(id),
+                inventory_id TEXT NOT NULL REFERENCES inventory(id),
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                status TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS technical_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                aircraft_id TEXT NOT NULL REFERENCES aircraft(id),
+                component TEXT NOT NULL,
+                record_type TEXT NOT NULL,
+                performed_at TEXT NOT NULL,
+                agency TEXT NOT NULL,
+                reference TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'synthetic demo'
+            );
+            CREATE TABLE IF NOT EXISTS data_imports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_type TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                imported_at TEXT NOT NULL,
+                accepted_rows INTEGER NOT NULL,
+                rejected_rows INTEGER NOT NULL
+            );
             """
         )
+        ensure_column(db, "telemetry_samples", "source", "TEXT NOT NULL DEFAULT 'synthetic demo'")
+        ensure_column(db, "work_orders", "component", "TEXT")
+        ensure_column(db, "work_orders", "agency_id", "TEXT")
+        ensure_column(db, "work_orders", "source_alert_id", "INTEGER")
+        ensure_column(db, "work_orders", "notes", "TEXT NOT NULL DEFAULT ''")
         today = date.today()
         if db.execute("SELECT COUNT(*) FROM aircraft").fetchone()[0]:
             existing_alerts = rows(
@@ -95,6 +143,7 @@ def initialize():
                     """SELECT aircraft_id, component, severity FROM alerts""",
             )
             seed_telemetry(db, existing_alerts, today)
+            seed_reference_data(db)
             return
 
         aircraft = [
@@ -159,6 +208,46 @@ def initialize():
                 ("PART-006", "Brake wear kit", "BWK-3011-C", "Airframe", 14, 6, 7, "Southern stores"),
             ],
         )
+        seed_reference_data(db)
+        db.executemany(
+            """INSERT INTO technical_records
+               (aircraft_id, component, record_type, performed_at, agency, reference, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("AC-308", "Hydraulic pump", "Inspection", (today - timedelta(days=12)).isoformat(),
+                 "Central Maintenance Unit", "DEMO-TR-001", "Pressure check recorded; sample history only."),
+                ("AC-203", "Landing gear actuator", "Repair", (today - timedelta(days=34)).isoformat(),
+                 "Western Aircraft Works", "DEMO-TR-002", "Actuator seal replaced; sample history only."),
+                ("AC-402", "Engine bearing", "Inspection", (today - timedelta(days=21)).isoformat(),
+                 "Engine Support Cell", "DEMO-TR-003", "Vibration reading logged; sample history only."),
+            ],
+        )
+
+
+def ensure_column(db, table, column, declaration):
+    columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def seed_reference_data(db):
+    agencies = [
+        ("AG-01", "Central Maintenance Unit", "Central Sector", "Hydraulics;general airframe"),
+        ("AG-02", "Western Aircraft Works", "Western Sector", "Airframe;landing gear"),
+        ("AG-03", "Engine Support Cell", "Eastern Sector", "Propulsion;engine"),
+        ("AG-04", "Avionics Repair Detachment", "North Sector", "Avionics;electrical"),
+        ("AG-05", "Field Service Team", "Southern Sector", "General;inspection"),
+    ]
+    db.executemany("INSERT OR IGNORE INTO maintenance_agencies VALUES (?, ?, ?, ?)", agencies)
+    mappings = [
+        ("Hydraulic pump", "PART-001"),
+        ("Engine bearing", "PART-002"),
+        ("Landing gear actuator", "PART-003"),
+        ("Avionics cooling fan", "PART-004"),
+        ("Fuel control unit", "PART-005"),
+        ("Brake assembly", "PART-006"),
+    ]
+    db.executemany("INSERT OR IGNORE INTO component_parts VALUES (?, ?)", mappings)
 
 
 def seed_telemetry(db, alerts, today):
@@ -208,6 +297,192 @@ def rows(db, query, params=()):
     return [dict(row) for row in db.execute(query, params).fetchall()]
 
 
+IMPORT_SCHEMAS = {
+    "telemetry": {
+        "required": {
+            "aircraft_id", "component", "observed_at", "vibration_rms",
+            "thermal_deviation", "pressure_drift", "response_lag",
+        },
+    },
+    "aircraft": {
+        "required": {
+            "id", "model", "squadron", "base", "status", "flight_hours",
+            "last_service", "health", "next_inspection",
+        },
+    },
+    "maintenance": {
+        "required": {
+            "aircraft_id", "component", "record_type", "performed_at",
+            "agency", "reference", "notes",
+        },
+    },
+    "inventory": {
+        "required": {
+            "id", "part", "part_number", "category", "on_hand",
+            "reorder_point", "lead_days", "location",
+        },
+    },
+}
+MAX_IMPORT_BYTES = 2_000_000
+MAX_IMPORT_ROWS = 5_000
+
+
+def csv_rows(payload, import_type):
+    schema = IMPORT_SCHEMAS.get(import_type)
+    if schema is None:
+        raise ValueError("Choose telemetry, aircraft, maintenance, or inventory.")
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError("CSV must use UTF-8 encoding.") from error
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if not reader.fieldnames:
+        raise ValueError("CSV must include a header row.")
+    reader.fieldnames = [header.strip() if header else "" for header in reader.fieldnames]
+    nonempty_headers = [header for header in reader.fieldnames if header]
+    if len(nonempty_headers) != len(set(nonempty_headers)):
+        raise ValueError("CSV must not contain duplicate column names.")
+    headers = {header.strip() for header in reader.fieldnames if header}
+    missing = sorted(schema["required"] - headers)
+    if missing:
+        raise ValueError(f"CSV is missing required columns: {', '.join(missing)}.")
+    parsed = []
+    for line_number, raw_row in enumerate(reader, start=2):
+        if len(parsed) >= MAX_IMPORT_ROWS:
+            raise ValueError(f"CSV cannot exceed {MAX_IMPORT_ROWS} data rows.")
+        row = {(key or "").strip(): (value or "").strip() for key, value in raw_row.items()}
+        if not any(row.values()):
+            continue
+        parsed.append((line_number, row))
+    if not parsed:
+        raise ValueError("CSV has no data rows.")
+    return parsed
+
+
+def parse_iso_date(value, column):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+        raise ValueError(f"{column} must use YYYY-MM-DD.")
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{column} must use YYYY-MM-DD.") from error
+    if parsed > date.today() + timedelta(days=3650):
+        raise ValueError(f"{column} is outside the accepted date range.")
+    return parsed.isoformat()
+
+
+def parse_number(value, column, minimum, maximum, integer=False):
+    try:
+        parsed = int(value) if integer else float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{column} must be a valid {'whole number' if integer else 'number'}.") from error
+    if not math.isfinite(parsed) or parsed < minimum or parsed > maximum:
+        raise ValueError(f"{column} must be between {minimum} and {maximum}.")
+    return parsed
+
+
+def import_row(db, import_type, row, source="CSV import"):
+    if import_type == "aircraft":
+        aircraft_id = row["id"].upper()
+        if not re.fullmatch(r"[A-Z0-9-]{2,24}", aircraft_id):
+            raise ValueError("Aircraft id must use 2–24 letters, numbers, or hyphens.")
+        status = row["status"].title()
+        if status not in {"Available", "Inspection", "Grounded"}:
+            raise ValueError("status must be Available, Inspection, or Grounded.")
+        flight_hours = parse_number(row["flight_hours"], "flight_hours", 0, 10_000_000)
+        health = parse_number(row["health"], "health", 0, 100, integer=True)
+        last_service = parse_iso_date(row["last_service"], "last_service")
+        next_inspection = parse_iso_date(row["next_inspection"], "next_inspection")
+        fields = [row[key] for key in ("model", "squadron", "base")]
+        if any(not value or len(value) > 100 for value in fields):
+            raise ValueError("model, squadron, and base must be 1–100 characters.")
+        db.execute(
+            """INSERT INTO aircraft
+               (id, model, squadron, base, status, flight_hours, last_service, health, next_inspection)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET model=excluded.model, squadron=excluded.squadron,
+                 base=excluded.base, status=excluded.status, flight_hours=excluded.flight_hours,
+                 last_service=excluded.last_service, health=excluded.health,
+                 next_inspection=excluded.next_inspection""",
+            (aircraft_id, *fields, status, flight_hours, last_service, health, next_inspection),
+        )
+        return
+    if import_type == "telemetry":
+        aircraft_id = row["aircraft_id"].upper()
+        if not db.execute("SELECT 1 FROM aircraft WHERE id = ?", (aircraft_id,)).fetchone():
+            raise ValueError(f"Unknown aircraft {aircraft_id}. Import aircraft before telemetry.")
+        component = row["component"]
+        if not component or len(component) > 80:
+            raise ValueError("component is required and must be 80 characters or fewer.")
+        observed_at = parse_iso_date(row["observed_at"], "observed_at")
+        values = [
+            parse_number(row[name], name, 0, 1)
+            for name in ai_engine.FEATURE_NAMES
+        ]
+        if db.execute(
+            "SELECT 1 FROM telemetry_samples WHERE aircraft_id=? AND component=? AND observed_at=?",
+            (aircraft_id, component, observed_at),
+        ).fetchone():
+            return "duplicate"
+        cycle = db.execute(
+            "SELECT COALESCE(MAX(sample_cycle), 0) + 1 FROM telemetry_samples WHERE aircraft_id=? AND component=?",
+            (aircraft_id, component),
+        ).fetchone()[0]
+        db.execute(
+            """INSERT INTO telemetry_samples
+               (aircraft_id, component, sample_cycle, observed_at, vibration_rms,
+                thermal_deviation, pressure_drift, response_lag, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (aircraft_id, component, cycle, observed_at, *values, source),
+        )
+        db.execute(
+            """INSERT INTO alerts (aircraft_id, component, severity, created_at)
+               SELECT ?, ?, 'Low', ?
+               WHERE NOT EXISTS (SELECT 1 FROM alerts WHERE aircraft_id=? AND component=?)""",
+            (aircraft_id, component, observed_at, aircraft_id, component),
+        )
+        return
+    if import_type == "maintenance":
+        aircraft_id = row["aircraft_id"].upper()
+        if not db.execute("SELECT 1 FROM aircraft WHERE id = ?", (aircraft_id,)).fetchone():
+            raise ValueError(f"Unknown aircraft {aircraft_id}. Import aircraft first.")
+        values = [row[key] for key in ("component", "record_type", "agency", "reference", "notes")]
+        if (any(len(value) > 500 for value in values)
+                or len(values[0]) > 80 or any(not value for value in values[:4])):
+            raise ValueError(
+                "Component (max 80 characters), record type, agency, and reference "
+                "are required; record fields are limited to 500 characters."
+            )
+        performed_at = parse_iso_date(row["performed_at"], "performed_at")
+        db.execute(
+            """INSERT INTO technical_records
+               (aircraft_id, component, record_type, performed_at, agency, reference, notes, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (aircraft_id, *values[:2], performed_at, *values[2:], source),
+        )
+        return
+    if import_type == "inventory":
+        part_id = row["id"].upper()
+        if not re.fullmatch(r"[A-Z0-9-]{2,32}", part_id):
+            raise ValueError("Part id must use 2–32 letters, numbers, or hyphens.")
+        descriptive = [row[key] for key in ("part", "part_number", "category", "location")]
+        if any(not value or len(value) > 120 for value in descriptive):
+            raise ValueError("Part description, part number, category, and location are required.")
+        on_hand = parse_number(row["on_hand"], "on_hand", 0, 1_000_000, integer=True)
+        reorder_point = parse_number(row["reorder_point"], "reorder_point", 0, 1_000_000, integer=True)
+        lead_days = parse_number(row["lead_days"], "lead_days", 0, 3650, integer=True)
+        db.execute(
+            """INSERT INTO inventory
+               (id, part, part_number, category, on_hand, reorder_point, lead_days, location)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET part=excluded.part,
+                 part_number=excluded.part_number, category=excluded.category,
+                 on_hand=excluded.on_hand, reorder_point=excluded.reorder_point,
+                 lead_days=excluded.lead_days, location=excluded.location""",
+            (part_id, *descriptive[:3], on_hand, reorder_point, lead_days, descriptive[3]),
+        )
+
+
 def get_predictions(db):
     assessments = rows(
         db,
@@ -215,13 +490,9 @@ def get_predictions(db):
                   a.acknowledged, f.model, f.squadron, f.base
            FROM alerts a JOIN aircraft f ON f.id = a.aircraft_id""",
     )
-    history = rows(
-        db,
-        """SELECT aircraft_id, component, sample_cycle, observed_at,
-                  vibration_rms, thermal_deviation, pressure_drift, response_lag
-           FROM telemetry_samples
-           ORDER BY aircraft_id, component, sample_cycle""",
-    )
+    history = rows(db, """SELECT aircraft_id, component, sample_cycle, observed_at,
+                  vibration_rms, thermal_deviation, pressure_drift, response_lag, source
+           FROM telemetry_samples ORDER BY aircraft_id, component, observed_at, sample_cycle""")
     history_by_component = {}
     for sample in history:
         key = (sample["aircraft_id"], sample["component"])
@@ -246,6 +517,15 @@ def get_predictions(db):
             "rul_cycles": rul_cycles,
             "sample_count": len(samples),
             "latest_observed_at": latest["observed_at"],
+            "data_source": latest["source"],
+            "history": [
+                {
+                    "cycle": sample["sample_cycle"],
+                    "observed_at": sample["observed_at"],
+                    **{name: round(sample[name], 3) for name in feature_names},
+                }
+                for sample in samples[-12:]
+            ],
             "input_signals": [
                 {"key": name, "label": ai_engine.FEATURE_LABELS[name],
                  "value": round(latest[name], 3)}
@@ -257,8 +537,73 @@ def get_predictions(db):
                 else "No strong anomaly signal"
             ),
         })
+        recommendation = db.execute(
+            """SELECT i.id, i.part, i.part_number, i.on_hand, i.reorder_point,
+                      i.lead_days, i.location
+               FROM component_parts cp JOIN inventory i ON i.id=cp.inventory_id
+               WHERE lower(cp.component)=lower(?)""",
+            (assessment["component"],),
+        ).fetchone()
+        result["recommended_spare"] = dict(recommendation) if recommendation else None
+        result["recommended_agency"] = recommend_agency(db, assessment["component"])
+        result["latest_maintenance_record"] = db.execute(
+            """SELECT record_type, performed_at, agency, reference, source
+               FROM technical_records WHERE aircraft_id=? AND lower(component)=lower(?)
+               ORDER BY performed_at DESC, id DESC LIMIT 1""",
+            (assessment["aircraft_id"], assessment["component"]),
+        ).fetchone()
+        if result["latest_maintenance_record"]:
+            result["latest_maintenance_record"] = dict(result["latest_maintenance_record"])
         predictions.append(result)
     return predictions
+
+
+def attach_aircraft_risk(aircraft, predictions):
+    risk_by_aircraft = {}
+    for prediction in predictions:
+        current = risk_by_aircraft.get(prediction["aircraft_id"])
+        if current is None or prediction["risk_percent"] > current["risk_percent"]:
+            risk_by_aircraft[prediction["aircraft_id"]] = {
+                "risk_percent": prediction["risk_percent"],
+                "components_monitored": 0,
+                "latest_data_source": prediction["data_source"],
+            }
+        risk_by_aircraft[prediction["aircraft_id"]]["components_monitored"] += 1
+    for item in aircraft:
+        assessment = risk_by_aircraft.get(item["id"])
+        item["ai_risk_percent"] = assessment["risk_percent"] if assessment else None
+        item["components_monitored"] = assessment["components_monitored"] if assessment else 0
+        item["telemetry_source"] = assessment["latest_data_source"] if assessment else None
+    return aircraft
+
+
+def recommend_agency(db, component):
+    text = component.lower()
+    if any(word in text for word in ("engine", "bearing", "turbine", "propulsion")):
+        specialty = "propulsion"
+    elif any(word in text for word in ("hydraulic", "pump", "actuator", "landing gear", "brake")):
+        specialty = "airframe"
+    elif any(word in text for word in ("avionic", "electrical", "radar", "cooling fan")):
+        specialty = "avionics"
+    else:
+        specialty = "general"
+    agencies = rows(db, "SELECT * FROM maintenance_agencies ORDER BY name")
+    matching = [
+        agency for agency in agencies
+        if specialty in agency["specialties"].lower()
+    ]
+    candidates = matching or agencies
+    if not candidates:
+        return None
+    counts = {
+        row["agency_id"]: row["open_count"]
+        for row in db.execute(
+            """SELECT agency_id, COUNT(*) AS open_count FROM work_orders
+               WHERE status != 'Completed' AND agency_id IS NOT NULL GROUP BY agency_id"""
+        ).fetchall()
+    }
+    selected = min(candidates, key=lambda agency: counts.get(agency["id"], 0))
+    return selected
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -282,8 +627,56 @@ class AppHandler(BaseHTTPRequestHandler):
             raise ValueError("A JSON object is required.")
         return body
 
+    def handle_csv_import(self, import_type):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 1 or length > MAX_IMPORT_BYTES:
+                return self.send_json({"error": "CSV upload must be between 1 byte and 2 MB."}, 413)
+            file_name = Path(
+                self.headers.get("X-Filename", "upload.csv").replace("\\", "/")
+            ).name[:120] or "upload.csv"
+            prepared_rows = csv_rows(self.rfile.read(length), import_type)
+            accepted = 0
+            duplicates = 0
+            errors = []
+            with connect() as db:
+                for line_number, row in prepared_rows:
+                    try:
+                        result = import_row(db, import_type, row, f"CSV: {file_name}")
+                        if result == "duplicate":
+                            duplicates += 1
+                        else:
+                            accepted += 1
+                    except (KeyError, ValueError) as error:
+                        errors.append({"line": line_number, "error": str(error)})
+                rejected = len(errors)
+                db.execute(
+                    """INSERT INTO data_imports
+                       (import_type, file_name, imported_at, accepted_rows, rejected_rows)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (import_type, file_name, datetime.now().astimezone().isoformat(timespec="seconds"),
+                     accepted, rejected),
+                )
+            return self.send_json({
+                "ok": accepted > 0,
+                "import_type": import_type,
+                "file_name": file_name,
+                "accepted_rows": accepted,
+                "duplicate_rows": duplicates,
+                "rejected_rows": rejected,
+                "errors": errors[:30],
+                "error_limit_reached": len(errors) > 30,
+            }, 200 if accepted or duplicates else 422)
+        except ValueError as error:
+            return self.send_json({"error": str(error)}, 400)
+        except sqlite3.Error:
+            return self.send_json({"error": "The CSV could not be imported into the local database."}, 500)
+
     def do_POST(self):
         path = urlparse(self.path).path.rstrip("/")
+        import_match = re.fullmatch(r"/api/import/(telemetry|aircraft|maintenance|inventory)", path)
+        if import_match:
+            return self.handle_csv_import(import_match.group(1))
         match = re.fullmatch(r"/api/alerts/(\d+)/acknowledge", path)
         order_status = re.fullmatch(r"/api/work-orders/(\d+)/status", path)
         reserve_part = re.fullmatch(r"/api/inventory/([A-Za-z0-9-]+)/reserve", path)
@@ -309,11 +702,55 @@ class AppHandler(BaseHTTPRequestHandler):
                         parsed_date = date.fromisoformat(due_date)
                     except (TypeError, ValueError):
                         return self.send_json({"error": "Enter a valid due date."}, 400)
+                    component = body.get("component", "")
+                    agency_id = body.get("agency_id") or None
+                    source_alert_id = body.get("source_alert_id")
+                    inventory_id = body.get("inventory_id") or None
+                    quantity = body.get("quantity", 1)
+                    notes = body.get("notes", "")
+                    if not isinstance(component, str) or len(component) > 80:
+                        return self.send_json({"error": "Component must be 80 characters or fewer."}, 400)
+                    if not isinstance(notes, str) or len(notes) > 500:
+                        return self.send_json({"error": "Notes must be 500 characters or fewer."}, 400)
+                    if agency_id and not db.execute(
+                        "SELECT 1 FROM maintenance_agencies WHERE id=?", (agency_id,)
+                    ).fetchone():
+                        return self.send_json({"error": "Select a valid maintenance agency."}, 400)
+                    if source_alert_id is not None:
+                        if isinstance(source_alert_id, bool) or not isinstance(source_alert_id, int):
+                            return self.send_json({"error": "Invalid source alert."}, 400)
+                        if not db.execute(
+                            "SELECT 1 FROM alerts WHERE id=? AND aircraft_id=?",
+                            (source_alert_id, aircraft_id),
+                        ).fetchone():
+                            return self.send_json({"error": "Source alert does not match the aircraft."}, 400)
+                    if inventory_id:
+                        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1 or quantity > 100:
+                            return self.send_json({"error": "Spare quantity must be a whole number from 1 to 100."}, 400)
+                        reserved = db.execute(
+                            "UPDATE inventory SET on_hand=on_hand-? WHERE id=? AND on_hand>=?",
+                            (quantity, inventory_id, quantity),
+                        )
+                        if not reserved.rowcount:
+                            return self.send_json({"error": "Selected spare is unavailable or stock is insufficient."}, 409)
+                    elif quantity != 1:
+                        return self.send_json({"error": "Choose a spare before setting its quantity."}, 400)
                     cursor = db.execute(
-                        """INSERT INTO work_orders (aircraft_id, title, priority, status, due_date, created_at)
-                           VALUES (?, ?, ?, 'Scheduled', ?, ?)""",
-                        (aircraft_id, title, priority, parsed_date.isoformat(), date.today().isoformat()),
+                        """INSERT INTO work_orders
+                           (aircraft_id, title, priority, status, due_date, created_at,
+                            component, agency_id, source_alert_id, notes)
+                           VALUES (?, ?, ?, 'Scheduled', ?, ?, ?, ?, ?, ?)""",
+                        (aircraft_id, title, priority, parsed_date.isoformat(), date.today().isoformat(),
+                         component or None, agency_id, source_alert_id, notes.strip()),
                     )
+                    if inventory_id:
+                        db.execute(
+                            """INSERT INTO work_order_parts (work_order_id, inventory_id, quantity, status)
+                               VALUES (?, ?, ?, 'Reserved')""",
+                            (cursor.lastrowid, inventory_id, quantity),
+                        )
+                    if source_alert_id is not None:
+                        db.execute("UPDATE alerts SET acknowledged=1 WHERE id=?", (source_alert_id,))
                     return self.send_json({"ok": True, "id": cursor.lastrowid}, 201)
                 if order_status:
                     status = body.get("status")
@@ -322,6 +759,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     result = db.execute("UPDATE work_orders SET status = ? WHERE id = ?", (status, int(order_status.group(1))))
                     if not result.rowcount:
                         return self.send_json({"error": "Work order not found."}, 404)
+                    db.execute(
+                        "UPDATE work_order_parts SET status=? WHERE work_order_id=?",
+                        ("Consumed" if status == "Completed" else "Reserved", int(order_status.group(1))),
+                    )
                     return self.send_json({"ok": True})
                 if reserve_part:
                     quantity = body.get("quantity")
@@ -409,9 +850,40 @@ class AppHandler(BaseHTTPRequestHandler):
                     return self.send_json({"status": "ok", "mode": "demo", "ai_model": ai_engine.MODEL_VERSION})
                 if path == "/api/model":
                     return self.send_json(ai_engine.model_info())
+                if path == "/api/integrations":
+                    return self.send_json({
+                        "mode": "demonstrator",
+                        "live_connections": False,
+                        "data_sources": [
+                            {"id": "aircraft-health", "label": "Aircraft health monitoring", "status": "CSV import ready",
+                             "records": db.execute("SELECT COUNT(*) FROM telemetry_samples").fetchone()[0]},
+                            {"id": "technical-records", "label": "Technical records", "status": "CSV import ready",
+                             "records": db.execute("SELECT COUNT(*) FROM technical_records").fetchone()[0]},
+                            {"id": "spares", "label": "Spare parts inventory", "status": "CSV import ready",
+                             "records": db.execute("SELECT COUNT(*) FROM inventory").fetchone()[0]},
+                            {"id": "maintenance-agencies", "label": "Maintenance agencies", "status": "Demo register",
+                             "records": db.execute("SELECT COUNT(*) FROM maintenance_agencies").fetchone()[0]},
+                        ],
+                        "recent_imports": rows(db, "SELECT * FROM data_imports ORDER BY id DESC LIMIT 10"),
+                        "last_updated": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    })
+                if path == "/api/agencies":
+                    return self.send_json(rows(db, "SELECT * FROM maintenance_agencies ORDER BY name"))
+                if path == "/api/imports":
+                    return self.send_json(rows(db, "SELECT * FROM data_imports ORDER BY id DESC LIMIT 50"))
+                if path == "/api/maintenance-history":
+                    aircraft_id = query.get("aircraft_id", [""])[0][:24]
+                    sql = """SELECT t.*, f.model FROM technical_records t
+                             JOIN aircraft f ON f.id=t.aircraft_id"""
+                    params = ()
+                    if aircraft_id:
+                        sql += " WHERE t.aircraft_id=?"
+                        params = (aircraft_id,)
+                    return self.send_json(rows(db, sql + " ORDER BY t.performed_at DESC, t.id DESC LIMIT 200", params))
                 if path == "/api/dashboard":
                     fleet = rows(db, "SELECT * FROM aircraft ORDER BY id")
                     predictions = get_predictions(db)
+                    attach_aircraft_risk(fleet, predictions)
                     alerts = [
                         item for item in predictions
                         if not item["acknowledged"] and item["risk_probability"] >= ai_engine.ALERT_THRESHOLD
@@ -445,7 +917,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     if status_filter in {"Available", "Inspection", "Grounded"}:
                         sql += " AND status = ?"
                         params.append(status_filter)
-                    return self.send_json(rows(db, sql + " ORDER BY id", params))
+                    aircraft = rows(db, sql + " ORDER BY id", params)
+                    attach_aircraft_risk(aircraft, get_predictions(db))
+                    return self.send_json(aircraft)
                 if path == "/api/alerts":
                     predictions = get_predictions(db)
                     predictions.sort(key=lambda item: (
@@ -463,8 +937,15 @@ class AppHandler(BaseHTTPRequestHandler):
                     )
                     return self.send_json(predictions)
                 if path == "/api/work-orders":
-                    return self.send_json(rows(db, """SELECT w.*, f.model, f.squadron FROM work_orders w
-                        JOIN aircraft f ON f.id = w.aircraft_id ORDER BY
+                    return self.send_json(rows(db, """SELECT w.*, f.model, f.squadron,
+                        ag.name AS agency_name, i.part AS reserved_part,
+                        i.part_number AS reserved_part_number, wp.quantity AS reserved_quantity,
+                        wp.status AS reservation_status
+                        FROM work_orders w
+                        JOIN aircraft f ON f.id = w.aircraft_id
+                        LEFT JOIN maintenance_agencies ag ON ag.id=w.agency_id
+                        LEFT JOIN work_order_parts wp ON wp.work_order_id=w.id
+                        LEFT JOIN inventory i ON i.id=wp.inventory_id ORDER BY
                         CASE w.status WHEN 'In progress' THEN 0 WHEN 'Scheduled' THEN 1 ELSE 2 END, w.due_date"""))
                 if path == "/api/inventory":
                     return self.send_json(rows(db, "SELECT * FROM inventory ORDER BY CASE WHEN on_hand <= reorder_point THEN 0 ELSE 1 END, part"))

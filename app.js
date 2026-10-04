@@ -5,6 +5,7 @@ const pageNames = {
   predictions: 'PREDICTIVE INSIGHTS',
   maintenance: 'MAINTENANCE',
   inventory: 'INVENTORY',
+  integrations: 'DATA INTEGRATION',
 };
 
 let currentPage = 'dashboard';
@@ -62,11 +63,12 @@ function severityBadge(severity) {
 }
 
 function aircraftRows(aircraft) {
-  if (!aircraft.length) return '<tr><td colspan="7" class="empty-state">No aircraft match this filter.</td></tr>';
+  if (!aircraft.length) return '<tr><td colspan="8" class="empty-state">No aircraft match this filter.</td></tr>';
   return aircraft.map((item) => `<tr>
     <td><span class="aircraft-id">${escapeHtml(item.id)}</span><span class="aircraft-model">${escapeHtml(item.model)}</span></td>
     <td>${escapeHtml(item.squadron)}</td><td>${escapeHtml(item.base)}</td>
     <td>${statusBadge(item.status)}</td><td>${healthMarkup(item.health)}</td>
+    <td>${item.ai_risk_percent === null || item.ai_risk_percent === undefined ? '<span class="muted-cell">No data</span>' : `<span class="risk-number ${item.ai_risk_percent >= 70 ? 'risk-high' : item.ai_risk_percent >= 50 ? 'risk-mid' : 'risk-low'}">${item.ai_risk_percent}%</span><span class="aircraft-model">${item.components_monitored} component${item.components_monitored === 1 ? '' : 's'}</span>`}</td>
     <td>${escapeHtml(Number(item.flight_hours).toLocaleString())} h</td><td>${formatDate(item.next_inspection)}</td>
   </tr>`).join('');
 }
@@ -113,7 +115,24 @@ function alertRows(alerts, actions = true) {
 
 function fleetTable(aircraft, compact = false) {
   const visible = compact ? aircraft.slice(0, 5) : aircraft;
-  return `<table class="fleet-table"><thead><tr><th>Aircraft</th><th>Squadron</th><th>Base</th><th>Status</th><th>Health</th><th>Flight hours</th><th>Next inspection</th></tr></thead><tbody>${aircraftRows(visible)}</tbody></table>`;
+  return `<table class="fleet-table"><thead><tr><th>Aircraft</th><th>Squadron</th><th>Base</th><th>Status</th><th>Health</th><th>AI risk</th><th>Flight hours</th><th>Next inspection</th></tr></thead><tbody>${aircraftRows(visible)}</tbody></table>`;
+}
+
+function sensorHistoryMarkup(history) {
+  if (!history?.length) return '<span class="muted-cell">No sensor history</span>';
+  const names = ['vibration_rms', 'thermal_deviation', 'pressure_drift', 'response_lag'];
+  const colors = ['#5271df', '#e1a342', '#37a58a', '#9a68c5'];
+  const width = 220;
+  const height = 54;
+  const paths = names.map((name, index) => {
+    const points = history.map((sample, sampleIndex) => {
+      const x = 3 + sampleIndex * (width - 6) / Math.max(history.length - 1, 1);
+      const y = height - 4 - Math.max(0, Math.min(1, sample[name])) * (height - 8);
+      return `${sampleIndex === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(' ');
+    return `<path d="${points}" fill="none" stroke="${colors[index]}" stroke-width="1.7" stroke-linecap="round"/>`;
+  }).join('');
+  return `<svg class="sensor-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Normalized sensor history across ${history.length} samples">${paths}</svg><span class="sensor-legend">${names.map((name, index) => `<span><i style="background:${colors[index]}"></i>${name.replaceAll('_', ' ')}</span>`).join('')}</span>`;
 }
 
 function dashboardMarkup(data) {
@@ -182,13 +201,16 @@ async function renderPredictions() {
   ]);
   const rows = predictions.map((item) => `<tr>
     <td><span class="aircraft-id">${escapeHtml(item.aircraft_id)}</span><span class="aircraft-model">${escapeHtml(item.model)} · ${escapeHtml(item.squadron)}</span></td>
-    <td>${escapeHtml(item.component)}<span class="aircraft-model">${escapeHtml(item.title)}</span><span class="model-signals">Driven by: ${item.top_signals.slice(0, 2).map((signal) => escapeHtml(signal.label)).join(' · ')}</span></td><td>${severityBadge(item.severity)}</td>
+    <td>${escapeHtml(item.component)}<span class="aircraft-model">${escapeHtml(item.title)}</span><span class="model-signals">Driven by: ${item.top_signals.slice(0, 2).map((signal) => escapeHtml(signal.label)).join(' · ')}</span>
+      <details class="sensor-details"><summary>${item.sample_count} samples · sensor history</summary>${sensorHistoryMarkup(item.history)}<span class="history-source">${escapeHtml(item.data_source)} · last sample ${formatDate(item.latest_observed_at)}</span></details>
+      ${item.latest_maintenance_record ? `<span class="model-signals">Last technical record: ${escapeHtml(item.latest_maintenance_record.record_type)} · ${formatDate(item.latest_maintenance_record.performed_at)}</span>` : ''}</td><td>${severityBadge(item.severity)}</td>
     <td class="rul-cell">${item.rul_cycles === null ? 'Insufficient data' : `${escapeHtml(item.rul_cycles)} cycles`}<small>trend threshold estimate</small></td>
     <td><div class="health-cell"><span class="health-track"><span class="${item.risk_percent >= 70 ? 'health-low' : item.risk_percent >= 50 ? 'health-mid' : ''}" style="width:${item.risk_percent}%"></span></span><span class="health-value">${item.risk_percent}%</span></div><span class="aircraft-model">${item.sample_count} samples</span></td>
     <td>${item.acknowledged ? '<span class="muted-cell">Reviewed</span>' : `<button class="table-action" data-action="ack-alert" data-id="${item.id}">Acknowledge</button>`}</td>
-    <td><button class="table-action" data-action="order-from-alert" data-aircraft="${escapeHtml(item.aircraft_id)}" data-component="${escapeHtml(item.component)}">Plan work</button></td>
+    <td>${item.recommended_spare ? `<span class="model-signals">${escapeHtml(item.recommended_spare.on_hand)} × ${escapeHtml(item.recommended_spare.part)}</span>` : '<span class="model-signals">No mapped spare</span>'}
+      <button class="table-action" data-action="order-from-alert" data-alert="${item.id}" data-aircraft="${escapeHtml(item.aircraft_id)}" data-component="${escapeHtml(item.component)}" data-agency="${escapeHtml(item.recommended_agency?.id || '')}" data-part="${escapeHtml(item.recommended_spare?.id || '')}">Plan work</button></td>
   </tr>`).join('');
-  pageContent.innerHTML = `${pageHeading('CONDITION MONITORING', 'AI predictive insights', 'A locally trained model scores sensor-history trends and shows which signals contribute most.', '<span class="demo-pill">SYNTHETIC MODEL · NOT CERTIFIED</span>')}
+  pageContent.innerHTML = `${pageHeading('COMPONENT DIGITAL TWIN', 'AI predictive insights', 'Each monitored component brings together sensor history, model risk, technical records, agency, and mapped spares.', '<span class="demo-pill">SYNTHETIC MODEL · NOT CERTIFIED</span>')}
     <section class="panel model-card"><div class="model-symbol">AI</div><div class="model-copy"><strong>${escapeHtml(model.name)}</strong><span>Version ${escapeHtml(model.version)} · trained locally on ${Number(model.training_samples).toLocaleString()} generated examples · ${model.features.length} sensor features</span></div><span class="model-status">RUNNING LOCALLY</span></section>
     <section class="panel table-panel"><div class="table-toolbar"><strong>Model assessments</strong><span>${predictions.length} component histories · highest risk first</span></div>
       <table class="data-table"><thead><tr><th>Aircraft</th><th>Component / leading signal</th><th>Model band</th><th>Est. threshold</th><th>Risk score</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-state">No predictions available.</td></tr>'}</tbody></table>
@@ -197,17 +219,28 @@ async function renderPredictions() {
 }
 
 async function renderMaintenance() {
-  const orders = await api('/api/work-orders');
+  const [orders, records] = await Promise.all([
+    api('/api/work-orders'),
+    api('/api/maintenance-history'),
+  ]);
   const rows = orders.map((order) => `<tr>
     <td><span class="aircraft-id">WO-${String(order.id).padStart(4, '0')}</span><span class="aircraft-model">${escapeHtml(order.aircraft_id)} · ${escapeHtml(order.squadron)}</span></td>
-    <td>${escapeHtml(order.title)}</td><td>${priorityBadge(order.priority)}</td><td>${formatDate(order.due_date)}</td>
+    <td>${escapeHtml(order.title)}${order.component ? `<span class="aircraft-model">${escapeHtml(order.component)}</span>` : ''}</td><td>${priorityBadge(order.priority)}</td><td>${escapeHtml(order.agency_name || 'Unassigned')}</td>
+    <td>${order.reserved_part ? `${escapeHtml(order.reserved_quantity)} × ${escapeHtml(order.reserved_part)}<span class="aircraft-model">${escapeHtml(order.reservation_status)}</span>` : '—'}</td><td>${formatDate(order.due_date)}</td>
     <td><select class="status-select" data-action="update-order" data-id="${order.id}" aria-label="Update work order status">${['Scheduled', 'In progress', 'Completed'].map((status) => `<option ${status === order.status ? 'selected' : ''}>${status}</option>`).join('')}</select></td>
     <td>${formatDate(order.created_at)}</td>
   </tr>`).join('');
+  const recordRows = records.map((record) => `<tr><td><span class="aircraft-id">${escapeHtml(record.aircraft_id)}</span><span class="aircraft-model">${escapeHtml(record.model)}</span></td>
+    <td>${escapeHtml(record.component)}</td><td>${escapeHtml(record.record_type)}</td><td>${formatDate(record.performed_at)}</td><td>${escapeHtml(record.agency)}</td>
+    <td>${escapeHtml(record.reference)}<span class="aircraft-model">${escapeHtml(record.source)}</span></td><td>${escapeHtml(record.notes || '—')}</td></tr>`).join('');
   pageContent.innerHTML = `${pageHeading('WORK MANAGEMENT', 'Maintenance', 'Plan, assign, and track maintenance work orders.', '<button class="button-primary" data-action="new-order"><span>＋</span> Create work order</button>')}
     <section class="panel table-panel"><div class="table-toolbar"><strong>Work order register</strong><span>${orders.filter((order) => order.status !== 'Completed').length} active · ${orders.length} total</span></div>
-      <table class="data-table"><thead><tr><th>Work order</th><th>Description</th><th>Priority</th><th>Due date</th><th>Status</th><th>Created</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty-state">No work orders yet. Create one to get started.</td></tr>'}</tbody></table>
+      <table class="data-table"><thead><tr><th>Work order</th><th>Description</th><th>Priority</th><th>Agency</th><th>Reserved spare</th><th>Due date</th><th>Status</th><th>Created</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty-state">No work orders yet. Create one to get started.</td></tr>'}</tbody></table>
       <div class="table-footer"><span>Status updates are stored in the local demo database</span><span>Created from planning inputs</span></div></section>`;
+  pageContent.insertAdjacentHTML('beforeend', `<section class="panel table-panel history-panel"><div class="table-toolbar"><strong>Technical history</strong><span>${records.length} aircraft/component records</span></div>
+      <table class="data-table"><thead><tr><th>Aircraft</th><th>Component</th><th>Record</th><th>Date</th><th>Agency</th><th>Reference</th><th>Notes</th></tr></thead><tbody>${recordRows || '<tr><td colspan="7" class="empty-state">No technical records. Import a maintenance CSV to begin.</td></tr>'}</tbody></table>
+      <div class="table-footer"><span>Source and reference retained for traceability</span><span>Verify against authoritative records</span></div></section>
+      <div class="section-note"><b>ⓘ</b><span>Agency assignments and part suggestions are demonstrator workflow aids. Approved technical instructions and qualified personnel remain authoritative.</span></div>`);
 }
 
 async function renderInventory() {
@@ -234,6 +267,36 @@ async function renderInventory() {
     <div class="section-note"><b>ⓘ</b><span>Real supply-chain integration needs authoritative inventory sources, role-based approval, and audited reservation workflows.</span></div>`;
 }
 
+const importDefinitions = [
+  { type: 'aircraft', title: 'Aircraft register', description: 'Aircraft identity, squadron, base, status, service dates, flight hours, and health index.', example: 'id,model,squadron,base,status,flight_hours,last_service,health,next_inspection' },
+  { type: 'telemetry', title: 'Health-monitoring telemetry', description: 'Time-stamped normalized sensor features. Each row is scored by the local model.', example: 'aircraft_id,component,observed_at,vibration_rms,thermal_deviation,pressure_drift,response_lag' },
+  { type: 'maintenance', title: 'Technical records', description: 'Maintenance actions, agency, record reference, outcome notes, and aircraft/component.', example: 'aircraft_id,component,record_type,performed_at,agency,reference,notes' },
+  { type: 'inventory', title: 'Spares inventory', description: 'Part identifiers, stock-on-hand, reorder thresholds, lead time, and store location.', example: 'id,part,part_number,category,on_hand,reorder_point,lead_days,location' },
+];
+
+async function renderIntegrations() {
+  const integration = await api('/api/integrations');
+  const sources = integration.data_sources.map((source) => `<article class="source-card">
+    <div class="source-card-top"><span class="source-dot"></span><span class="source-status">${escapeHtml(source.status)}</span></div>
+    <strong>${escapeHtml(source.label)}</strong><span class="source-count">${Number(source.records).toLocaleString()} records currently indexed</span>
+  </article>`).join('');
+  const imports = integration.recent_imports.map((item) => `<tr><td>${escapeHtml(item.import_type)}</td><td>${escapeHtml(item.file_name)}</td><td>${formatDate(item.imported_at.slice(0, 10))}</td><td>${item.accepted_rows}</td><td>${item.rejected_rows}</td></tr>`).join('');
+  const cards = importDefinitions.map((definition) => `<article class="panel import-card">
+    <div class="import-card-heading"><div><span class="eyebrow">CSV ADAPTER</span><h2>${escapeHtml(definition.title)}</h2></div><button class="table-action" data-action="download-template" data-type="${definition.type}">Download template</button></div>
+    <p>${escapeHtml(definition.description)}</p>
+    <code class="schema-code">${escapeHtml(definition.example)}</code>
+    <label class="file-picker">Choose CSV file<input type="file" accept=".csv,text/csv" data-import-type="${definition.type}"></label>
+    <div class="import-result" id="import-result-${definition.type}" aria-live="polite"></div>
+  </article>`).join('');
+  pageContent.innerHTML = `${pageHeading('DATA MESH · CONNECTIVITY', 'Data integration', 'Import disconnected fleet datasets, preserve provenance, and feed a unified component-health view.', '<span class="demo-pill">CSV CONNECTORS · NO LIVE FEEDS</span>')}
+    <div class="integration-banner"><span class="integration-symbol">⇄</span><div><strong>One maintenance picture, four source domains</strong><p>Load approved synthetic or sanitized CSV exports. Aircraft IDs join telemetry, technical records, inventory, and work orders.</p></div></div>
+    <div class="source-grid">${sources}</div>
+    <div class="integration-limit"><strong>Integration boundary</strong><span>This demonstrator does not connect directly to aircraft, IMMOLS, e-MMS, ERP, or an OEM. CSV imports are the explicit adapter boundary; uploaded source, accepted rows, and rejected-row counts are audited. Sensor features must be normalized from 0 to 1 using an authorized, documented transformation before import.</span></div>
+    <div class="import-grid">${cards}</div>
+    <section class="panel table-panel import-history"><div class="table-toolbar"><strong>Import audit</strong><span>${integration.recent_imports.length} recent imports</span></div>
+      <table class="data-table"><thead><tr><th>Dataset</th><th>File</th><th>Imported</th><th>Accepted</th><th>Rejected</th></tr></thead><tbody>${imports || '<tr><td colspan="5" class="empty-state">No CSV imports yet. Download a template to get started.</td></tr>'}</tbody></table></section>`;
+}
+
 async function renderPage() {
   currentPage = location.hash.slice(1) || 'dashboard';
   if (!pageNames[currentPage]) currentPage = 'dashboard';
@@ -248,6 +311,7 @@ async function renderPage() {
       predictions: renderPredictions,
       maintenance: renderMaintenance,
       inventory: renderInventory,
+      integrations: renderIntegrations,
     };
     await renderers[currentPage]();
     if (currentPage !== 'dashboard') {
@@ -264,13 +328,26 @@ async function renderPage() {
 
 async function showWorkOrderDialog(aircraftId = '', title = '') {
   try {
-    fleetCache = await api('/api/aircraft');
+    const [aircraft, agencies, parts] = await Promise.all([
+      api('/api/aircraft'),
+      api('/api/agencies'),
+      api('/api/inventory'),
+    ]);
+    fleetCache = aircraft;
+    document.getElementById('wo-agency').innerHTML = `<option value="">Unassigned</option>${agencies.map((agency) => `<option value="${escapeHtml(agency.id)}">${escapeHtml(agency.name)} · ${escapeHtml(agency.base)}</option>`).join('')}`;
+    document.getElementById('wo-spare').innerHTML = `<option value="">No part reservation</option>${parts.map((part) => `<option value="${escapeHtml(part.id)}" ${part.on_hand < 1 ? 'disabled' : ''}>${escapeHtml(part.part)} · ${escapeHtml(part.part_number)} · ${part.on_hand} available</option>`).join('')}`;
   } catch (error) {
     return toast(error.message, true);
   }
   const select = document.getElementById('wo-aircraft');
   select.innerHTML = fleetCache.map((aircraft) => `<option value="${escapeHtml(aircraft.id)}" ${aircraft.id === aircraftId ? 'selected' : ''}>${escapeHtml(aircraft.id)} · ${escapeHtml(aircraft.model)}</option>`).join('');
   document.getElementById('wo-title').value = title;
+  document.getElementById('wo-component').value = '';
+  document.getElementById('wo-agency').value = '';
+  document.getElementById('wo-spare').value = '';
+  document.getElementById('wo-quantity').value = '1';
+  document.getElementById('wo-notes').value = '';
+  document.getElementById('wo-source-alert').value = '';
   document.getElementById('wo-priority').value = 'Routine';
   document.getElementById('wo-date').value = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
   document.getElementById('work-order-dialog').showModal();
@@ -294,7 +371,15 @@ document.addEventListener('click', async (event) => {
       await renderPage();
     } catch (error) { action.disabled = false; toast(error.message, true); }
   }
-  if (kind === 'order-from-alert') return showWorkOrderDialog(action.dataset.aircraft, `Inspect ${action.dataset.component}`);
+  if (kind === 'order-from-alert') {
+    await showWorkOrderDialog(action.dataset.aircraft, `Inspect ${action.dataset.component}`);
+    document.getElementById('wo-component').value = action.dataset.component;
+    document.getElementById('wo-agency').value = action.dataset.agency;
+    document.getElementById('wo-spare').value = action.dataset.part;
+    document.getElementById('wo-source-alert').value = action.dataset.alert;
+    document.getElementById('wo-priority').value = 'High';
+    return;
+  }
   if (kind === 'reserve-part') {
     action.disabled = true;
     try {
@@ -302,6 +387,23 @@ document.addEventListener('click', async (event) => {
       toast('One unit reserved in the local demo inventory.');
       await renderInventory();
     } catch (error) { action.disabled = false; toast(error.message, true); }
+  }
+  if (kind === 'download-template') {
+    const definition = importDefinitions.find((item) => item.type === action.dataset.type);
+    if (!definition) return;
+    const sample = {
+      aircraft: 'AC-DEMO-01,Demo aircraft,Demo squadron,Demo base,Available,10,2026-01-01,90,2026-12-01',
+      telemetry: 'AC-104,Hydraulic pump,2026-10-04,0.45,0.38,0.51,0.22',
+      maintenance: 'AC-104,Hydraulic pump,Inspection,2026-01-01,Demo agency,DEMO-REF-001,Synthetic example only',
+      inventory: 'PART-DEMO-01,Demo component,DEMO-0001,General,4,2,14,Demo stores',
+    }[definition.type];
+    const blob = new Blob([`${definition.example}\n${sample}\n`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `airpower-${definition.type}-template.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 });
 
@@ -336,10 +438,48 @@ document.addEventListener('input', (event) => {
   }, 180);
 });
 
+document.addEventListener('change', async (event) => {
+  const input = event.target.closest('[data-import-type]');
+  if (!input || !input.files?.length) return;
+  const type = input.dataset.importType;
+  const file = input.files[0];
+  let result;
+  const report = (data) => {
+    result = document.getElementById(`import-result-${type}`);
+    result.className = `import-result${data.rejected_rows ? ' has-errors' : ''}`;
+    result.innerHTML = `<strong>${data.accepted_rows} accepted · ${data.duplicate_rows} duplicates · ${data.rejected_rows} rejected</strong>${data.errors.map((item) => `<span>Line ${item.line}: ${escapeHtml(item.error)}</span>`).join('')}${data.error_limit_reached ? '<span>More row errors omitted.</span>' : ''}`;
+  };
+  result = document.getElementById(`import-result-${type}`);
+  result.className = 'import-result pending';
+  result.textContent = `Importing ${file.name}…`;
+  try {
+    const response = await fetch(`/api/import/${type}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv', 'X-Filename': file.name },
+      body: file,
+    });
+    const data = await response.json();
+    if (!response.ok && response.status !== 422) throw new Error(data.error || `Import failed (${response.status}).`);
+    toast(`${type} import finished: ${data.accepted_rows} accepted, ${data.rejected_rows} rejected.`, Boolean(data.rejected_rows && !data.accepted_rows));
+    await renderIntegrations();
+    report(data);
+  } catch (error) {
+    result.className = 'import-result has-errors';
+    result.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    if (input.isConnected) input.value = '';
+  }
+});
+
 document.getElementById('work-order-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const payload = Object.fromEntries(form.entries());
+  payload.quantity = Number(payload.quantity);
+  payload.source_alert_id = payload.source_alert_id ? Number(payload.source_alert_id) : null;
+  if (!payload.inventory_id) payload.inventory_id = null;
+  if (!payload.agency_id) payload.agency_id = null;
   try {
     await api('/api/work-orders', { method: 'POST', body: JSON.stringify(payload) });
     document.getElementById('work-order-dialog').close();

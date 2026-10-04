@@ -158,6 +158,10 @@ h1 { margin: 5px 0 4px; color: #19283c; font: 700 24px/1.25 'Manrope', 'Segoe UI
 .health-track span.health-mid { background: #e5ab4b; }
 .health-track span.health-low { background: #dc6a5d; }
 .health-value { color: #65758b; font-size: 9px; }
+.risk-number { font-size: 10px; font-weight: 700; }
+.risk-number.risk-high { color: #c25b51; }
+.risk-number.risk-mid { color: #a6782e; }
+.risk-number.risk-low { color: #398d75; }
 .table-footer { display: flex; justify-content: space-between; padding: 10px 14px; border-top: 1px solid #edf0f4; color: #98a3b1; font-size: 8px; }
 
 .filters-row { display: flex; align-items: center; gap: 8px; margin: -3px 0 13px; }
@@ -199,6 +203,41 @@ h1 { margin: 5px 0 4px; color: #19283c; font: 700 24px/1.25 'Manrope', 'Segoe UI
 .model-copy span { color: #8b98a8; font-size: 9px; }
 .model-status { margin-left: auto; padding: 5px 7px; border-radius: 5px; color: #328c74; background: #eaf7f2; font-size: 8px; font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
 .model-signals { display: block; margin-top: 4px; color: #7282a1; font-size: 8px; }
+.sensor-details { margin-top: 5px; color: #718097; font-size: 8px; }
+.sensor-details summary { cursor: pointer; color: #6075b5; font-weight: 600; }
+.sensor-chart { display: block; width: min(220px, 100%); height: 42px; margin-top: 5px; }
+.sensor-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; max-width: 230px; }
+.sensor-legend span { display: inline-flex; align-items: center; gap: 3px; color: #8793a3; font-size: 7px; text-transform: capitalize; }
+.sensor-legend i { width: 5px; height: 5px; border-radius: 50%; }
+.history-source { display: block; margin-top: 4px; color: #9aa5b2; font-size: 7px; }
+.history-panel { margin-top: 14px; }
+.integration-banner { display: flex; align-items: center; gap: 12px; margin-bottom: 13px; padding: 15px; border: 1px solid #dfe8f8; border-radius: 9px; background: linear-gradient(110deg, #f5f7ff, #fbfcff); }
+.integration-symbol { display: grid; flex: 0 0 auto; place-items: center; width: 37px; height: 37px; border-radius: 10px; color: #4869da; background: #e8edff; font-size: 22px; }
+.integration-banner strong { color: #33445c; font: 700 12px 'Manrope', sans-serif; }
+.integration-banner p { margin: 4px 0 0; color: #7f8da2; font-size: 9px; line-height: 1.5; }
+.source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.source-card { display: grid; gap: 8px; min-height: 102px; padding: 12px; border: 1px solid #e8edf3; border-radius: 8px; background: #fff; box-shadow: var(--panel-shadow); }
+.source-card-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.source-dot { width: 6px; height: 6px; border-radius: 50%; background: #48ae92; }
+.source-status { color: #3f8e79; font-size: 8px; font-weight: 600; text-align: right; }
+.source-card strong { color: #38495e; font-size: 9px; }
+.source-count { color: #929eac; font-size: 8px; }
+.integration-limit { display: grid; gap: 4px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid #f0e5cc; border-radius: 7px; color: #88774f; background: #fffaf0; font-size: 9px; line-height: 1.5; }
+.integration-limit strong { color: #816c3b; font-size: 9px; }
+.import-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.import-card { display: flex; flex-direction: column; gap: 9px; padding: 13px; }
+.import-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.import-card-heading h2 { margin: 4px 0 0; color: #2f4057; font: 700 11px 'Manrope', sans-serif; }
+.import-card p { min-height: 28px; margin: 0; color: #8592a2; font-size: 9px; line-height: 1.45; }
+.schema-code { display: block; overflow-wrap: anywhere; padding: 7px; border-radius: 5px; color: #697a95; background: #f6f8fb; font: 8px/1.45 Consolas, monospace; }
+.file-picker { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 0 9px; border: 1px dashed #cfd8e5; border-radius: 6px; color: #526a9a; background: #fbfcff; cursor: pointer; font-size: 9px; font-weight: 600; }
+.file-picker:hover { border-color: #879de8; background: #f6f8ff; }
+.file-picker input { max-width: 58%; color: #7c899b; font-size: 8px; }
+.import-result { display: grid; gap: 4px; color: #39836d; font-size: 8px; line-height: 1.4; }
+.import-result.pending { color: #687999; }
+.import-result.has-errors { color: #a3544b; }
+.import-result strong { font-size: 9px; }
+.import-history { margin-top: 13px; }
 
 .page-footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid #e8ecf1; color: #9ba6b4; font-size: 8px; }
 .page-footer i { display: inline-block; width: 5px; height: 5px; margin: 0 3px 1px; border-radius: 50%; background: #43b795; }
@@ -224,6 +263,7 @@ h1 { margin: 5px 0 4px; color: #19283c; font: 700 24px/1.25 'Manrope', 'Segoe UI
 
 @media (min-width: 1500px) { .main-content { padding: 0 46px; } .page-content { padding-top: 28px; } }
 @media (max-width: 1120px) { .main-content { padding: 0 22px; } .sidebar { width: 220px; } .main-content { margin-left: 220px; } .kpi-grid { gap: 9px; } .kpi-card { padding: 13px 12px; } .dashboard-grid { grid-template-columns: minmax(0, 1.25fr) minmax(285px, .95fr); gap: 10px; } }
+@media (max-width: 1050px) { .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 850px) {
   .sidebar { transform: translateX(-100%); transition: transform .2s ease; box-shadow: 8px 0 24px #10223a24; }
   .sidebar.open { transform: translateX(0); }
@@ -233,6 +273,7 @@ h1 { margin: 5px 0 4px; color: #19283c; font: 700 24px/1.25 'Manrope', 'Segoe UI
   .topbar { justify-content: flex-start; gap: 13px; }
   .topbar-actions { gap: 10px; margin-left: auto; }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
   .main-content { padding: 0 13px; }
@@ -260,4 +301,7 @@ h1 { margin: 5px 0 4px; color: #19283c; font: 700 24px/1.25 'Manrope', 'Segoe UI
   .chart-summary { top: 10px; }
   .model-card { align-items: flex-start; flex-wrap: wrap; }
   .model-status { margin-left: 46px; }
+  .import-grid { grid-template-columns: 1fr; }
+  .source-grid { grid-template-columns: 1fr 1fr; }
+  .integration-banner { align-items: flex-start; }
 }
